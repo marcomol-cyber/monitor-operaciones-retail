@@ -30,6 +30,11 @@ class ActualizacionProducto(BaseModel):
     precio: float | None = None
     stock: int | None = None
 
+class Venta(BaseModel):
+    id: int
+    producto_id: int
+    cantidad: int
+
 #Funciones
 def revisar_stock(stock):
     if stock == 0:
@@ -109,6 +114,18 @@ def obtener_productos():
 
     return productos_db
 
+@app.get("/ventas")
+def obtener_ventas():
+    conexion = obtener_conexion()
+    cursor = conexion.cursor(row_factory=dict_row)
+
+    cursor.execute("SELECT * FROM ventas;")
+    ventas = cursor.fetchall()
+
+    cursor.close()
+    conexion.close()
+
+    return ventas
 
 @app.post("/productos")
 def crear_producto(producto: Producto):
@@ -125,6 +142,28 @@ def crear_producto(producto: Producto):
     cursor.close()
     conexion.close()
     return producto
+
+@app.post("/ventas")
+def crear_venta(venta: Venta):
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+
+    cursor.execute(
+        "INSERT INTO ventas (id, producto_id, cantidad, fecha) VALUES (%s, %s, %s, CURRENT_TIMESTAMP);",
+        (venta.id, venta.producto_id, venta.cantidad)
+    )
+
+    cursor.execute(
+        "UPDATE productos SET stock = stock - %s WHERE id = %s;",
+        (venta.cantidad, venta.producto_id)
+    )
+
+
+    conexion.commit()
+    cursor.close()
+    conexion.close()
+
+    return venta
 
 
 @app.patch("/productos/{producto_id}")

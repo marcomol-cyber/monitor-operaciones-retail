@@ -236,6 +236,11 @@ def crear_producto(producto: Producto):
 
 @app.post("/ventas")
 def crear_venta(venta: Venta):
+    if venta.cantidad <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="La cantidad debe ser mayor que 0"
+        )
     conexion = obtener_conexion()
     cursor = conexion.cursor(row_factory=dict_row)
 

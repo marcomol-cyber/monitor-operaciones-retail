@@ -1,6 +1,17 @@
 #Imports
+import os
+import psycopg
+from psycopg.rows import dict_row
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+
+load_dotenv()
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT")
+DB_NAME = os.getenv("DB_NAME")
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
 
 #Configuración de la API
 app = FastAPI(
@@ -20,73 +31,156 @@ class ActualizacionProducto(BaseModel):
     stock: int | None = None
 
 #Funciones
-def revisar_stock(producto):
-    if producto.stock == 0:
+def revisar_stock(stock):
+    if stock == 0:
         return "SIN STOCK"
-    elif producto.stock < 5:
+    elif stock < 5:
         return "STOCK CRÍTICO"
     else:
         return "STOCK NORMAL"
-    
-#Datos
-productos = [
-    Producto(id=1, nombre="Café", precio=8000, stock=7),
-    Producto(id=2, nombre="Leche", precio=1500, stock=0),
-    Producto(id=3, nombre="Arroz", precio=2000, stock=25),
-    Producto(id=4, nombre="Yerba", precio=4500, stock=3)
-]
+
+def obtener_conexion():
+    return psycopg.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        dbname=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD
+    )    
+
 
 #Endpoints
-@app.get("/productos")
-def obtener_productos():
-    return productos
-
 @app.get("/alertas/stock")
 def obtener_alertas_stock():
+    conexion = obtener_conexion()
+    cursor = conexion.cursor(row_factory=dict_row)
+
+    cursor.execute("SELECT * FROM productos;")
+    productos_db = cursor.fetchall()
+
+    cursor.close()
+    conexion.close()
+
     alertas = []
-    for producto in productos:
-        estado = revisar_stock(producto)
+
+    for producto in productos_db:
+        estado = revisar_stock(producto["stock"])
+
         if estado != "STOCK NORMAL":
             alertas.append({
-                "id": producto.id,
-                "nombre": producto.nombre,
-                "stock": producto.stock,
+                "id": producto["id"],
+                "nombre": producto["nombre"],
+                "stock": producto["stock"],
                 "estado": estado
             })
+
     return alertas
 
 @app.get("/productos/{producto_id}")
 def obtener_producto(producto_id: int):
-    for producto in productos:
-        if producto.id == producto_id:
-            return producto
-    raise HTTPException(status_code=404, detail="Producto no encontrado")
+    conexion = obtener_conexion()
+    cursor = conexion.cursor(row_factory=dict_row)
+
+    cursor.execute(
+        "SELECT * FROM productos WHERE id = %s;",
+        (producto_id,)
+    )
+
+    producto = cursor.fetchone()
+
+    cursor.close()
+    conexion.close()
+
+    if producto is None:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+
+    return producto
+
+@app.get("/productos")
+def obtener_productos():
+    conexion = obtener_conexion()
+    cursor = conexion.cursor(row_factory=dict_row)
+
+    cursor.execute("SELECT * FROM productos ORDER BY id;")
+    productos_db = cursor.fetchall()
+
+    cursor.close()
+    conexion.close()
+
+    return productos_db
+
 
 @app.post("/productos")
 def crear_producto(producto: Producto):
-    for producto_existente in productos:
-        if producto_existente.id == producto.id:
-            raise HTTPException(status_code=409, detail="Ya existe un producto con ese ID")
-    productos.append(producto)
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+
+    cursor.execute(
+        "INSERT INTO productos (id, nombre, precio, stock) VALUES (%s, %s, %s, %s);",
+        (producto.id, producto.nombre, producto.precio, producto.stock)
+    )
+
+    conexion.commit()
+
+    cursor.close()
+    conexion.close()
     return producto
+
 
 @app.patch("/productos/{producto_id}")
 def actualizar_producto(producto_id: int, cambios: ActualizacionProducto):
-    for producto in productos:
-        if producto.id == producto_id:
-            if cambios.nombre is not None:
-                producto.nombre = cambios.nombre
-            if cambios.precio is not None:
-                producto.precio = cambios.precio
-            if cambios.stock is not None:
-                producto.stock = cambios.stock
-            return producto
-    raise HTTPException(status_code=404, detail="Producto no encontrado")
+    conexion = obtener_conexion()
+    cursor = conexion.cursor(row_factory=dict_row)
+
+    cursor.execute(
+        "SELECT * FROM productos WHERE id = %s;",
+        (producto_id,)
+    )
+    producto = cursor.fetchone()
+
+    if producto is None:
+        cursor.close()
+        conexion.close()
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+
+    if cambios.nombre is not None:
+        producto["nombre"] = cambios.nombre
+
+    if cambios.precio is not None:
+        producto["precio"] = cambios.precio
+
+    if cambios.stock is not None:
+        producto["stock"] = cambios.stock
+
+    cursor.execute(
+        "UPDATE productos SET nombre = %s, precio = %s, stock = %s WHERE id = %s;",
+        (
+            producto["nombre"],
+            producto["precio"],
+            producto["stock"],
+            producto_id
+        )
+    )
+
+    conexion.commit()
+    cursor.close()
+    conexion.close()
+
+    return producto
+
 
 @app.delete("/productos/{producto_id}")
 def eliminar_producto(producto_id: int):
-    for producto in productos:
-        if producto.id == producto_id:
-            productos.remove(producto)
-            return {"mensaje": "Producto eliminado correctamente"}
-    raise HTTPException(status_code=404, detail="Producto no encontrado")
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+
+    cursor.execute(
+        "DELETE FROM productos WHERE id = %s;",
+        (producto_id,)
+    )
+
+    conexion.commit()
+    cursor.close()
+    conexion.close()
+
+    return {"mensaje": "Producto eliminado correctamente"}

@@ -318,6 +318,17 @@ def importar_producto(producto_id: int):
 
 @app.patch("/productos/{producto_id}")
 def actualizar_producto(producto_id: int, cambios: ActualizacionProducto):
+    if cambios.precio is not None and cambios.precio < 0:
+        raise HTTPException(
+            status_code=400,
+            detail="El precio no puede ser negativo"
+        )
+
+    if cambios.stock is not None and cambios.stock < 0:
+        raise HTTPException(
+            status_code=400,
+            detail="El stock no puede ser negativo"
+        )
     conexion = obtener_conexion()
     cursor = conexion.cursor(row_factory=dict_row)
 

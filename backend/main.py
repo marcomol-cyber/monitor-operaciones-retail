@@ -147,14 +147,14 @@ def obtener_facturacion():
 
     return resultado
 
-@app.get("/metricas/unidades-vendidas")
-def obtener_unidades_vendidas():
+@app.get("/metricas/valor-inventario")
+def obtener_valor_inventario():
     conexion = obtener_conexion()
     cursor = conexion.cursor(row_factory=dict_row)
 
     cursor.execute("""
-        SELECT SUM(cantidad) AS unidades_vendidas
-        FROM ventas;
+        SELECT SUM(precio * stock) AS valor_inventario
+        FROM productos;
     """)
 
     resultado = cursor.fetchone()
@@ -200,6 +200,23 @@ def obtener_productos_externos():
         })
 
     return productos_externos
+
+@app.get("/metricas/valor_inventario")
+def obtener_valor_inventario():
+    conexion = obtener_conexion()
+    cursor = conexion.cursor(row_factory=dict_row)
+
+    cursor.execute(""" 
+        SELECT SUM(precio * stock) AS valor_inventario
+        FROM productos;)
+    """)
+
+    resultado = cursor.fetchone()
+
+    cursor.close()
+    conexion.close()
+
+    return resultado
 
 @app.post("/productos")
 def crear_producto(producto: Producto):

@@ -1,6 +1,7 @@
 #Imports
 import os
 import psycopg
+import requests
 from psycopg.rows import dict_row
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -127,6 +128,79 @@ def obtener_ventas():
 
     return ventas
 
+@app.get("/metricas/facturacion")
+def obtener_facturacion():
+    conexion = obtener_conexion()
+    cursor = conexion.cursor(row_factory=dict_row)
+
+    cursor.execute("""
+        SELECT SUM(ventas.cantidad * productos.precio) AS facturacion_total
+        FROM ventas
+        JOIN productos
+            ON ventas.producto_id = productos.id;
+    """)
+
+    resultado = cursor.fetchone()
+
+    cursor.close()
+    conexion.close()
+
+    return resultado
+
+@app.get("/metricas/unidades-vendidas")
+def obtener_unidades_vendidas():
+    conexion = obtener_conexion()
+    cursor = conexion.cursor(row_factory=dict_row)
+
+    cursor.execute("""
+        SELECT SUM(cantidad) AS unidades_vendidas
+        FROM ventas;
+    """)
+
+    resultado = cursor.fetchone()
+
+    cursor.close()
+    conexion.close()
+
+    return resultado
+
+@app.get("/metricas/ventas-por-producto")
+def obtener_ventas_por_producto():
+    conexion = obtener_conexion()
+    cursor = conexion.cursor(row_factory=dict_row)
+
+    cursor.execute("""
+        SELECT productos.nombre, SUM(ventas.cantidad) AS unidades_vendidas
+        FROM ventas
+        JOIN productos
+            ON ventas.producto_id = productos.id
+        GROUP BY productos.nombre;
+    """)
+
+    resultado = cursor.fetchall()
+
+    cursor.close()
+    conexion.close()
+
+    return resultado
+
+@app.get("/productos-externos")
+def obtener_productos_externos():
+    respuesta = requests.get("https://dummyjson.com/products?limit=3")
+    datos = respuesta.json()
+
+    productos_externos = []
+
+    for producto in datos["products"]:
+        productos_externos.append({
+            "id": producto["id"],
+            "nombre": producto["title"],
+            "precio": producto["price"],
+            "stock": producto["stock"]
+        })
+
+    return productos_externos
+
 @app.post("/productos")
 def crear_producto(producto: Producto):
     conexion = obtener_conexion()
@@ -146,7 +220,23 @@ def crear_producto(producto: Producto):
 @app.post("/ventas")
 def crear_venta(venta: Venta):
     conexion = obtener_conexion()
-    cursor = conexion.cursor()
+    cursor = conexion.cursor(row_factory=dict_row)
+
+    cursor.execute(
+        "SELECT * FROM productos WHERE id = %s;",
+        (venta.producto_id,)
+    )
+    producto = cursor.fetchone()
+
+    if producto is None:
+        cursor.close()
+        conexion.close()
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+
+    if producto["stock"] < venta.cantidad:
+        cursor.close()
+        conexion.close()
+        raise HTTPException(status_code=400, detail="Stock insuficiente")
 
     cursor.execute(
         "INSERT INTO ventas (id, producto_id, cantidad, fecha) VALUES (%s, %s, %s, CURRENT_TIMESTAMP);",
@@ -158,12 +248,39 @@ def crear_venta(venta: Venta):
         (venta.cantidad, venta.producto_id)
     )
 
+    conexion.commit()
+
+    cursor.close()
+    conexion.close()
+
+    return venta
+
+@app.post("/productos-externos/{producto_id}")
+def importar_producto(producto_id: int):
+    respuesta = requests.get(
+        f"https://dummyjson.com/products/{producto_id}"
+    )
+
+    producto_externo = respuesta.json()
+
+    conexion = obtener_conexion()
+    cursor = conexion.cursor()
+
+    cursor.execute(
+        "INSERT INTO productos (id, nombre, precio, stock) VALUES (%s, %s, %s, %s);",
+        (
+            producto_externo["id"] + 1000,
+            producto_externo["title"],
+            producto_externo["price"],
+            producto_externo["stock"]
+        )
+    )
 
     conexion.commit()
     cursor.close()
     conexion.close()
 
-    return venta
+    return {"mensaje": "Producto externo importado correctamente"}
 
 
 @app.patch("/productos/{producto_id}")

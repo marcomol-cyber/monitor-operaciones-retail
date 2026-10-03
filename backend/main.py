@@ -220,6 +220,17 @@ def obtener_valor_inventario():
 
 @app.post("/productos")
 def crear_producto(producto: Producto):
+    if producto.precio < 0:
+        raise HTTPException(
+            status_code=400,
+            detail="El precio no puede ser negativo"
+    )
+
+    if producto.stock < 0:
+        raise HTTPException(
+            status_code=400,
+            detail="El stock no puede ser negativo"
+    )
     conexion = obtener_conexion()
     cursor = conexion.cursor()
 
